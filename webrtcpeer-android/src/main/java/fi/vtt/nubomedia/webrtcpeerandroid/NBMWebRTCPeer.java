@@ -22,14 +22,21 @@ import java.util.List;
 import android.content.Context;
 import android.util.Log;
 import org.webrtc.DataChannel;
+import org.webrtc.DefaultVideoDecoderFactory;
+import org.webrtc.DefaultVideoEncoderFactory;
+import org.webrtc.EglRenderer;
 import org.webrtc.IceCandidate;
 import org.webrtc.MediaStream;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnection.IceConnectionState;
 import org.webrtc.PeerConnectionFactory;
 import org.webrtc.SessionDescription;
-import org.webrtc.VideoRenderer;
-import org.webrtc.VideoRendererGui;
+import org.webrtc.VideoDecoderFactory;
+import org.webrtc.VideoEncoderFactory;
+import org.webrtc.VideoSink;
+import org.webrtc.EglBase;
+import org.webrtc.audio.AudioDeviceModule;
+
 import fi.vtt.nubomedia.utilitiesandroid.LooperExecutor;
 
 /**
@@ -79,8 +86,8 @@ public class NBMWebRTCPeer{
     private NBMMediaConfiguration config;
     private NBMPeerConnectionParameters peerConnectionParameters;
     private SignalingParameters signalingParameters = null;
-    private VideoRenderer.Callbacks localRender;
-    private VideoRenderer.Callbacks masterRenderer;
+    private MediaResourceManager.ProxyVideoSink localRender;
+    private  MediaResourceManager.ProxyVideoSink masterRenderer;
     private MediaStream activeMasterStream;
     private Observer observer;
     private PeerConnectionFactory peerConnectionFactory;
@@ -261,7 +268,7 @@ public class NBMWebRTCPeer{
 	* @param  observer			An observer instance which implements WebRTC callback functions
 	*/
     public NBMWebRTCPeer(NBMMediaConfiguration config, Context context,
-                         VideoRenderer.Callbacks localRenderer, Observer observer) {
+                         MediaResourceManager.ProxyVideoSink localRenderer, Observer observer) {
 
         this.context = context;
         this.localRender = localRenderer;
@@ -299,7 +306,7 @@ public class NBMWebRTCPeer{
     }
 
     @SuppressWarnings("unused")
-    public void registerMasterRenderer(VideoRenderer.Callbacks masterRenderer) {
+    public void registerMasterRenderer( MediaResourceManager.ProxyVideoSink masterRenderer) {
         this.masterRenderer = masterRenderer;
         updateMasterRenderer();
     }
@@ -529,7 +536,9 @@ public class NBMWebRTCPeer{
 
     private boolean startLocalMediaSync() {
         if (mediaResourceManager != null && mediaResourceManager.getLocalMediaStream() == null) {
-            mediaResourceManager.createLocalMediaStream(VideoRendererGui.getEglBaseContext(), localRender);
+            final EglBase eglBase = EglBase.create();
+            mediaResourceManager.CreatePeerConnectionInternal(eglBase.getEglBaseContext());
+            mediaResourceManager.createLocalMediaStream(eglBase.getEglBaseContext(), localRender, context);
             mediaResourceManager.startVideoSource();
             mediaResourceManager.selectCameraPosition(config.getCameraPosition());
             return true;
@@ -571,7 +580,7 @@ public class NBMWebRTCPeer{
      * @param remoteStream The remote media stream
      */
     @SuppressWarnings("unused")
-    public void attachRendererToRemoteStream(VideoRenderer.Callbacks remoteRender, MediaStream remoteStream){
+    public void attachRendererToRemoteStream(MediaResourceManager.ProxyVideoSink remoteRender, MediaStream remoteStream){
         mediaResourceManager.attachRendererToRemoteStream(remoteRender, remoteStream);
     }
 
@@ -658,7 +667,17 @@ public class NBMWebRTCPeer{
 
     private void createPeerConnectionFactoryInternal(Context context) {
         Log.d(TAG, "Create peer connection peerConnectionFactory. Use video: " + peerConnectionParameters.videoCallEnabled);
-//        isError = false;
+        String field_trails = "";
+        //if (VIDEO_CODEC_H264_HIGH.equals(peerConnectionParameters.videoCodec)) {
+            field_trails += "WebRTC-H264HighProfile/Enabled/";
+        //}
+        PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context)
+                .setFieldTrials(field_trails)
+                .setEnableInternalTracer(true)
+                .createInitializationOptions()
+        );
+
+/*//        isError = false;
         // Initialize field trials.
         String field_trials = FIELD_TRIAL_AUTOMATIC_RESIZE;
         // Check if VP9 is used by default.
@@ -677,7 +696,7 @@ public class NBMWebRTCPeer{
 //            Log.d(TAG, "Factory networkIgnoreMask option: " + options.networkIgnoreMask);
 //            peerConnectionFactory.setOptions(options);
 //        }
-        Log.d(TAG, "Peer connection peerConnectionFactory created.");
+        Log.d(TAG, "Peer connection peerConnectionFactory created.");*/
     }
 
 }

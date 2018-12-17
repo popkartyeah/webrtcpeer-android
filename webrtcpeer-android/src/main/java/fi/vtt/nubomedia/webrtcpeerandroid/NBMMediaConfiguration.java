@@ -19,7 +19,6 @@ package fi.vtt.nubomedia.webrtcpeerandroid;
 
 import android.graphics.ImageFormat;
 
-import org.webrtc.VideoRenderer;
 
 /**
  * Media configuration object used in construction of NBMWebRTCPeer

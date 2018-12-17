@@ -24,6 +24,7 @@ import org.webrtc.IceCandidate;
 import org.webrtc.MediaConstraints;
 import org.webrtc.MediaStream;
 import org.webrtc.PeerConnection;
+import org.webrtc.RtpReceiver;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import java.util.HashMap;
@@ -208,6 +209,11 @@ public class NBMPeerConnection implements PeerConnection.Observer, SdpObserver {
     }
 
     @Override
+    public void onIceCandidatesRemoved(IceCandidate[] iceCandidates) {
+
+    }
+
+    @Override
     public void onAddStream(final MediaStream mediaStream) {
         executor.execute(new Runnable() {
             @Override
@@ -256,6 +262,11 @@ public class NBMPeerConnection implements PeerConnection.Observer, SdpObserver {
             Log.d(TAG, sdpMediaConstraints.toString());
             pc.createOffer(NBMPeerConnection.this, sdpMediaConstraints);
         }*/
+    }
+
+    @Override
+    public void onAddTrack(RtpReceiver rtpReceiver, MediaStream[] mediaStreams) {
+
     }
 
     @Override

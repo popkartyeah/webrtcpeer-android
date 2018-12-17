@@ -5,12 +5,12 @@ apply plugin: "com.jfrog.bintray"
 version "1.1.1"
 
 android {
-    compileSdkVersion 25
-    buildToolsVersion '23.0.2'
+    compileSdkVersion 28
+    buildToolsVersion '28.0.3'
 
     defaultConfig {
         minSdkVersion 15
-        targetSdkVersion 25
+        targetSdkVersion 28
         versionCode 1
         versionName "1.1.1"
     }
@@ -20,13 +20,17 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+    compileOptions {
+        sourceCompatibility = '1.8'
+        targetCompatibility = '1.8'
+    }
 }
 
 dependencies {
     // compile fileTree(dir: 'libs', include: ['*.jar'])
     testCompile 'junit:junit:4.12'
-    compile('fi.vtt.nubomedia:utilities-android:1.0.2@aar') { transitive=true }
-    compile('io.pristine:libjingle:11139@aar') { transitive=true }
+    compile('fi.vtt.nubomedia:utilities-android:1.0.2@aar') { transitive = true }
+    implementation 'org.webrtc:google-webrtc:1.0.+'
 }
 
 def siteUrl = 'https://github.com/nubomedia-vtt/webrtcpeer-android'      // Homepage URL of the library
