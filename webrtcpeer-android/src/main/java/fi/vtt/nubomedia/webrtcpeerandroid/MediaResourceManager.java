@@ -18,7 +18,10 @@
 package fi.vtt.nubomedia.webrtcpeerandroid;
 
 import android.content.Context;
+import android.content.Intent;
 import android.util.Log;
+
+import org.webrtc.Camera1Enumerator;
 import org.webrtc.CameraEnumerationAndroid;
 import org.webrtc.CameraVideoCapturer;
 import org.webrtc.DataChannel;
@@ -125,11 +128,11 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
     private SurfaceTextureHelper surfaceTextureHelper;
     // private EglBase rootEglBase;
 
-    public class ProxyVideoSink implements VideoSink {
+    public static class ProxyVideoSink implements VideoSink {
         private VideoSink target;
 
         @Override
-        public void onFrame(VideoFrame videoFrame) {
+        synchronized public void onFrame(VideoFrame videoFrame) {
             if(target == null){
                 Logging.d(TAG,"Dropping frame in proxy because target is null");
                 return;
@@ -141,6 +144,10 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
             this.target = target;
         }
 
+        synchronized public VideoSink getTarget(){
+            return this.target;
+        }
+
     }
 
     // private HashMap<VideoRenderer.Callbacks,VideoSink> remoteVideoRenderers;
@@ -148,7 +155,7 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
     private HashMap<VideoSink,MediaStream> remoteVideoMediaStreams;
 
     // private VideoRenderer.Callbacks localRender;
-    private ProxyVideoSink localRender;
+    private VideoSink localRender;
     private NBMWebRTCPeer.NBMPeerConnectionParameters peerConnectionParameters;
     private VideoCapturer videoCapturer;
     private NBMCameraPosition currentCameraPosition;
@@ -251,6 +258,7 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
                 .setVideoDecoderFactory(decoderFactory)
                 .setVideoEncoderFactory(encoderFactory)
                 .createPeerConnectionFactory();
+        Logging.d(TAG,"Peer connection factory created");
     }
 
     MediaConstraints getPcConstraints(){
@@ -292,7 +300,6 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
     }
 
     private VideoTrack createCapturerVideoTrack(VideoCapturer capturer) {
-        videoSource = factory.createVideoSource(capturer.isScreencast());
         capturer.startCapture(peerConnectionParameters.videoWidth, peerConnectionParameters.videoHeight, peerConnectionParameters.videoFps);
         localVideoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, videoSource);
         localVideoTrack.setEnabled(renderVideo);
@@ -302,10 +309,10 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
     }
 
     private class AttachRendererTask implements Runnable {
-        private ProxyVideoSink remoteRender;
+        private VideoSink remoteRender;
         private MediaStream remoteStream;
 
-        private AttachRendererTask(ProxyVideoSink remoteRender, MediaStream remoteStream){
+        private AttachRendererTask(VideoSink remoteRender, MediaStream remoteStream){
             this.remoteRender = remoteRender;
             this.remoteStream = remoteStream;
         }
@@ -332,8 +339,8 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
 
                 ProxyVideoSink newVideoRenderer = new ProxyVideoSink();
                 newVideoRenderer.setTarget(remoteRender);
-                remoteVideoTrack.addSink(newVideoRenderer);
-                remoteVideoRenderers.put(remoteRender, newVideoRenderer);
+                remoteVideoTrack.addSink(newVideoRenderer.getTarget());
+                remoteVideoRenderers.put(newVideoRenderer, remoteRender);
                 remoteVideoMediaStreams.put(newVideoRenderer, remoteStream);
                 remoteVideoTracks.put(remoteStream, remoteVideoTrack);
                 Log.d(TAG, "Attached.");
@@ -341,18 +348,48 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
         }
     }
 
-    void attachRendererToRemoteStream(ProxyVideoSink remoteRender, MediaStream remoteStream){
+    void attachRendererToRemoteStream(VideoSink remoteRender, MediaStream remoteStream){
         Log.d(TAG, "Schedule attaching VideoRenderer to remote stream (" + remoteStream + ")");
         executor.execute(new AttachRendererTask(remoteRender, remoteStream));
     }
 
-    void createLocalMediaStream(EglBase.Context renderEGLContext,final ProxyVideoSink localRender, Context appContext) {
+    private boolean useCamera2(Context appContext, Intent intent){
+        return Camera2Enumerator.isSupported(appContext);
+    }
+
+    private VideoCapturer createCameraCapture(CameraEnumerator enumerator){
+        final String[] deviceNames = enumerator.getDeviceNames();
+
+        Logging.d(TAG, "Looking for front facing cameras");
+        for(String deviceName : deviceNames){
+            if(enumerator.isFrontFacing(deviceName)){
+                Logging.d(TAG, "Creating front facing camera capture");
+                VideoCapturer videoCapturer = enumerator.createCapturer(deviceName, null);
+
+                if(videoCapturer != null)
+                    return videoCapturer;
+            }
+        }
+        Logging.d(TAG, "Looking for other cameras");
+        for(String deviceName : deviceNames){
+            if(!enumerator.isFrontFacing(deviceName)){
+                Logging.d(TAG, "Creating other facing camera capture");
+                VideoCapturer videoCapturer = enumerator.createCapturer(deviceName, null);
+
+                if(videoCapturer != null)
+                    return videoCapturer;
+            }
+        }
+        return null;
+    }
+
+    void createLocalMediaStream(EglBase.Context renderEGLContext,final VideoSink localRender, Context appContext, Intent intent) {
         if (factory == null) {
             Log.e(TAG, "Peerconnection factory is not created");
             return;
         }
         this.localRender = localRender;
-        localRender.setTarget(localRender);
+        // localRender.setTarget(localRender);
         if (videoCallEnabled) {
             //factory.setVideoHwAccelerationOptions(renderEGLContext, renderEGLContext);
         }
@@ -388,20 +425,13 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
             videoCapturer = VideoCapturerAndroid.create(cameraDeviceName, null);*/
 
             // Camera2 support???
-            camEnumerator = new Camera2Enumerator(appContext);
-            String [] deviceNames = camEnumerator.getDeviceNames();
-            Logging.d(TAG,"Looking for front facing cameras.");
-            for(String deviceName : deviceNames) {
-                if (currentCameraPosition==NBMCameraPosition.BACK && camEnumerator.isBackFacing(deviceName)){
-                    Logging.d(TAG,"Create back facing cameras");
-                    videoCapturer = camEnumerator.createCapturer(deviceName,null);
-                } else if (currentCameraPosition==NBMCameraPosition.FRONT && camEnumerator.isFrontFacing(deviceName)){
-                    Logging.d(TAG,"Create front facing cameras");
-                    videoCapturer = camEnumerator.createCapturer(deviceName,null);
-                }
-
+            if (useCamera2(appContext, intent)) {
+                camEnumerator = new Camera2Enumerator(appContext);
+            } else {
+                camEnumerator = new Camera1Enumerator(false);
             }
-
+            videoCapturer = createCameraCapture(camEnumerator);
+            videoSource = factory.createVideoSource(videoCapturer.isScreencast());
             surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", renderEGLContext);
             videoCapturer.initialize(surfaceTextureHelper, appContext, videoSource.getCapturerObserver());
             if (videoCapturer == null) {
