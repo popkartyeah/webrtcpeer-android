@@ -22,11 +22,8 @@ import android.content.Intent;
 import android.util.Log;
 
 import org.webrtc.Camera1Enumerator;
-import org.webrtc.CameraEnumerationAndroid;
 import org.webrtc.CameraVideoCapturer;
 import org.webrtc.DataChannel;
-import org.webrtc.DefaultVideoDecoderFactory;
-import org.webrtc.DefaultVideoEncoderFactory;
 import org.webrtc.IceCandidate;
 import org.webrtc.Logging;
 import org.webrtc.MediaCodecVideoEncoder;
@@ -37,8 +34,6 @@ import org.webrtc.PeerConnectionFactory;
 import org.webrtc.SessionDescription;
 import org.webrtc.SurfaceTextureHelper;
 import org.webrtc.VideoCapturer;
-import org.webrtc.VideoDecoderFactory;
-import org.webrtc.VideoEncoderFactory;
 import org.webrtc.VideoSink;
 import org.webrtc.VideoFrame;
 import org.webrtc.Camera2Enumerator;
@@ -243,24 +238,6 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
         sdpMediaConstraints.optional.add(new MediaConstraints.KeyValuePair("internalSctpDataChannels", "true"));
     }
 
-    void CreatePeerConnectionInternal(EglBase.Context renderEGLContext){
-        PeerConnectionFactory.Options options = new PeerConnectionFactory.Options();
-
-        final VideoEncoderFactory encoderFactory;
-        final VideoDecoderFactory decoderFactory;
-
-        // hard ware must
-        decoderFactory = new DefaultVideoDecoderFactory(renderEGLContext);
-        encoderFactory = new DefaultVideoEncoderFactory(renderEGLContext, false, true);
-
-        factory = PeerConnectionFactory.builder()
-                .setOptions(options)
-                .setVideoDecoderFactory(decoderFactory)
-                .setVideoEncoderFactory(encoderFactory)
-                .createPeerConnectionFactory();
-        Logging.d(TAG,"Peer connection factory created");
-    }
-
     MediaConstraints getPcConstraints(){
         return pcConstraints;
     }
@@ -279,7 +256,13 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
             public void run() {
                 if (videoSource != null && !videoSourceStopped) {
                     Log.d(TAG, "Stop video source.");
-                    executor.stop();
+                    try {
+                        videoCapturer.stopCapture();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                    videoSource.dispose();
+                    videoSource = null;
                     videoSourceStopped = true;
                 }
             }
@@ -353,7 +336,7 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
         executor.execute(new AttachRendererTask(remoteRender, remoteStream));
     }
 
-    private boolean useCamera2(Context appContext, Intent intent){
+    private boolean useCamera2(Context appContext){
         return Camera2Enumerator.isSupported(appContext);
     }
 
@@ -383,7 +366,7 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
         return null;
     }
 
-    void createLocalMediaStream(EglBase.Context renderEGLContext,final VideoSink localRender, Context appContext, Intent intent) {
+    void createLocalMediaStream(EglBase.Context renderEGLContext,final VideoSink localRender, Context appContext) {
         if (factory == null) {
             Log.e(TAG, "Peerconnection factory is not created");
             return;
@@ -425,7 +408,7 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
             videoCapturer = VideoCapturerAndroid.create(cameraDeviceName, null);*/
 
             // Camera2 support???
-            if (useCamera2(appContext, intent)) {
+            if (useCamera2(appContext)) {
                 camEnumerator = new Camera2Enumerator(appContext);
             } else {
                 camEnumerator = new Camera1Enumerator(false);
@@ -544,6 +527,8 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
         // Uncomment only if you know what you are doing
         localMediaStream.dispose();
         localMediaStream = null;
+        if (videoSource != null)
+            videoSource.dispose();
         videoCapturer.dispose();
         videoCapturer = null;
         surfaceTextureHelper.dispose();

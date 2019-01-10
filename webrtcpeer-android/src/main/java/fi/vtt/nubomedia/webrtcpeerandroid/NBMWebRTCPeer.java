@@ -20,14 +20,13 @@ package fi.vtt.nubomedia.webrtcpeerandroid;
 import java.util.LinkedList;
 import java.util.List;
 import android.content.Context;
-import android.content.Intent;
 import android.util.Log;
 import org.webrtc.DataChannel;
 import org.webrtc.DefaultVideoDecoderFactory;
 import org.webrtc.DefaultVideoEncoderFactory;
-import org.webrtc.EglRenderer;
+import org.webrtc.HardwareVideoEncoderFactory;
 import org.webrtc.IceCandidate;
-import org.webrtc.Logging;
+import org.webrtc.MediaCodecVideoEncoder;
 import org.webrtc.MediaStream;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnection.IceConnectionState;
@@ -86,7 +85,6 @@ public class NBMWebRTCPeer{
     private static final String FIELD_TRIAL_H264 = "WebRTC-MediaTekH264/Enabled/";
     private final LooperExecutor executor;
     private Context context;
-    private Intent  intent;
     private NBMMediaConfiguration config;
     private NBMPeerConnectionParameters peerConnectionParameters;
     private SignalingParameters signalingParameters = null;
@@ -273,10 +271,9 @@ public class NBMWebRTCPeer{
 	* @param  observer			An observer instance which implements WebRTC callback functions
 	*/
     public NBMWebRTCPeer(NBMMediaConfiguration config, Context context, EglBase.Context eglContext,
-                         VideoSink localRenderer, Observer observer, Intent intent) {
+                         VideoSink localRenderer, Observer observer) {
 
         this.context = context;
-        this.intent  = intent;
         //this.localRender = localRenderer;
         this.localProxyRender.setTarget(localRenderer);
         this.eglBaseContext = eglContext;
@@ -359,7 +356,7 @@ public class NBMWebRTCPeer{
         public void run() {
             if (mediaResourceManager.getLocalMediaStream() == null) {
                 mediaResourceManager.createMediaConstraints();
-                startLocalMediaSync(intent);
+                startLocalMediaSync();
             }
 
             NBMPeerConnection connection = peerConnectionResourceManager.getConnection(connectionId);
@@ -543,10 +540,10 @@ public class NBMWebRTCPeer{
         });
     }
 
-    private boolean startLocalMediaSync(Intent intent) {
+    private boolean startLocalMediaSync() {
         if (mediaResourceManager != null && mediaResourceManager.getLocalMediaStream() == null) {
             // mediaResourceManager.CreatePeerConnectionInternal(eglBaseContext);
-            mediaResourceManager.createLocalMediaStream(eglBaseContext, localProxyRender.getTarget(), context, intent);
+            mediaResourceManager.createLocalMediaStream(eglBaseContext, localProxyRender.getTarget(), context);
             mediaResourceManager.startVideoSource();
             mediaResourceManager.selectCameraPosition(config.getCameraPosition());
             return true;
@@ -565,7 +562,7 @@ public class NBMWebRTCPeer{
             executor.execute(new Runnable() {
                 @Override
                 public void run() {
-                    startLocalMediaSync(intent);
+                    startLocalMediaSync();
                 }
             });
             return true;
@@ -693,14 +690,14 @@ public class NBMWebRTCPeer{
 
         // hard ware must
         decoderFactory = new DefaultVideoDecoderFactory(eglBaseContext);
-        encoderFactory = new DefaultVideoEncoderFactory(eglBaseContext, false, true);
+        encoderFactory = new DefaultVideoEncoderFactory(eglBaseContext,false, true);
 
         peerConnectionFactory = PeerConnectionFactory.builder()
                 .setOptions(options)
                 .setVideoDecoderFactory(decoderFactory)
                 .setVideoEncoderFactory(encoderFactory)
                 .createPeerConnectionFactory();
-        Logging.d(TAG,"Peer connection factory created");
+//        Logging.d(TAG,"Peer connection factory created");
 /*//        isError = false;
         // Initialize field trials.
         String field_trials = FIELD_TRIAL_AUTOMATIC_RESIZE;

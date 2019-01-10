@@ -59,7 +59,7 @@ public class NBMPeerConnection implements PeerConnection.Observer, SdpObserver {
     Vector<NBMWebRTCPeer.Observer> observers;
     NBMWebRTCPeer.NBMPeerConnectionParameters peerConnectionParameters;
 
-    /* This private class exists to receive per-channel events and forward them to upper layers
+    /* This private class exists to receive per-channel evernts and forward them to upper layers
        with the channel instance
       */
     private class ObservedDataChannel implements DataChannel.Observer {
