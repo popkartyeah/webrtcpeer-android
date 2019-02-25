@@ -18,7 +18,9 @@
 package fi.vtt.nubomedia.webrtcpeerandroid;
 
 import android.content.Context;
-import android.content.Intent;
+import android.media.CamcorderProfile;
+import android.media.MediaRecorder;
+import android.os.Environment;
 import android.util.Log;
 
 import org.webrtc.Camera1Enumerator;
@@ -44,6 +46,12 @@ import org.webrtc.EglBase;
 import org.webrtc.VideoSink;
 import org.webrtc.VideoSource;
 import org.webrtc.VideoTrack;
+
+import java.io.File;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.concurrent.CountDownLatch;
 import java.util.EnumSet;
 import java.util.HashMap;
 import fi.vtt.nubomedia.utilitiesandroid.LooperExecutor;
@@ -84,7 +92,7 @@ import fi.vtt.nubomedia.webrtcpeerandroid.NBMMediaConfiguration.NBMCameraPositio
  */
 
 
-final class MediaResourceManager implements NBMWebRTCPeer.Observer {
+final class MediaResourceManager implements NBMWebRTCPeer.Observer, MediaRecorder.OnInfoListener {
     private static final String TAG = "MediaResourceManager";
     private static final String DTLS_SRTP_KEY_AGREEMENT_CONSTRAINT = "DtlsSrtpKeyAgreement";
     private static final int HD_VIDEO_WIDTH = 1280;
@@ -121,6 +129,29 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
     private HashMap<MediaStream,VideoTrack> remoteVideoTracks;
 
     private SurfaceTextureHelper surfaceTextureHelper;
+
+    /**
+     * Called to indicate an info or a warning during recording.
+     *
+     * @param mr    the MediaRecorder the info pertains to
+     * @param what  the type of info or warning that has occurred
+     *              <ul>
+     *              <li>
+     *              <li>
+     *              <li>
+     *              </ul>
+     * @param extra an extra code, specific to the info type
+     */
+    @Override
+    public void onInfo(MediaRecorder mr, int what, int extra) {
+        if(what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED){
+            Logging.d(TAG, "Maximum File Size Reached");
+            StopLocalRecord(mediaRecorder);
+            mediaRecorder.reset();
+            StartLocalRecord(mediaRecorder);
+        }
+
+    }
     // private EglBase rootEglBase;
 
     public static class ProxyVideoSink implements VideoSink {
@@ -153,8 +184,10 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
     private VideoSink localRender;
     private NBMWebRTCPeer.NBMPeerConnectionParameters peerConnectionParameters;
     private VideoCapturer videoCapturer;
+    private MediaRecorder mediaRecorder;
     private NBMCameraPosition currentCameraPosition;
     private CameraEnumerator camEnumerator;
+    private boolean m_bCamerav2;
 
     MediaResourceManager(NBMWebRTCPeer.NBMPeerConnectionParameters peerConnectionParameters,
                                 LooperExecutor executor, PeerConnectionFactory factory){
@@ -255,6 +288,11 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
             @Override
             public void run() {
                 if (videoSource != null && !videoSourceStopped) {
+                    if (mediaRecorder != null)
+                    {
+                        StopLocalRecord(mediaRecorder);
+                        mediaRecorder = null;
+                    }
                     Log.d(TAG, "Stop video source.");
                     try {
                         videoCapturer.stopCapture();
@@ -282,10 +320,120 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
         });
     }
 
+    private void PrepareMediaRecord(MediaRecorder mediaRecorder, boolean use_surface)
+    {
+        /*MediaRecord record the local stream*/
+        mediaRecorder.reset();
+        String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+        final String videoOutPath = Environment.getExternalStorageDirectory().getPath()
+                + "/webrtc_test_video/" + timestamp +".mp4";
+        File outputFile = new File(videoOutPath);
+        mediaRecorder.setOnInfoListener(this);
+        mediaRecorder.setMaxFileSize(400*1024*1024);
+        mediaRecorder.setMaxDuration(900000);
+        if (use_surface) {
+            mediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
+        } else {
+            mediaRecorder.setVideoSource(MediaRecorder.VideoSource.CAMERA);
+        }
+        mediaRecorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
+        mediaRecorder.setAudioChannels(2);
+        mediaRecorder.setAudioSamplingRate(48000);
+
+        CamcorderProfile profile = CamcorderProfile.get(CamcorderProfile.QUALITY_1080P);
+        profile.videoCodec = MediaRecorder.VideoEncoder.H264;
+        profile.videoBitRate = 2000000;
+        profile.videoFrameWidth = 1920;
+        profile.videoFrameHeight = 1080;
+        mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+        mediaRecorder.setVideoFrameRate(profile.videoFrameRate);
+        mediaRecorder.setVideoSize(profile.videoFrameWidth, profile.videoFrameHeight);
+        mediaRecorder.setVideoEncodingBitRate(profile.videoBitRate);
+        mediaRecorder.setVideoEncoder(profile.videoCodec);
+        mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+        mediaRecorder.setOutputFile(outputFile.getPath());
+        try {
+            mediaRecorder.prepare();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void StartLocalRecord(MediaRecorder mediaRecorder)
+    {
+        if (m_bCamerav2) {
+            PrepareMediaRecord(mediaRecorder, true);
+        }
+
+        // Add MediaRecorder to camera pipeline.
+        final boolean[] addMediaRecorderSuccessful = new boolean[1];
+        final CountDownLatch addBarrier = new CountDownLatch(1);
+        CameraVideoCapturer.MediaRecorderHandler addMediaRecorderHandler =
+                new CameraVideoCapturer.MediaRecorderHandler() {
+                    @Override
+                    public void onMediaRecorderSuccess() {
+                        addMediaRecorderSuccessful[0] = true;
+                        addBarrier.countDown();
+                    }
+                    @Override
+                    public void onMediaRecorderError(String errorDescription) {
+                        Logging.e(TAG, errorDescription);
+                        addMediaRecorderSuccessful[0] = false;
+                        addBarrier.countDown();
+                    }
+                };
+        CameraVideoCapturer camVideoCapture = (CameraVideoCapturer) videoCapturer;
+        camVideoCapture.addMediaRecorderToCamera(mediaRecorder, addMediaRecorderHandler);
+        // Wait until MediaRecoder has been added.
+        try {
+            addBarrier.await();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        if (!m_bCamerav2)
+        {
+            PrepareMediaRecord(mediaRecorder, false);
+        }
+//        mediaRecorder.start();
+    }
+
+    private void StopLocalRecord(MediaRecorder mediaRecorder)
+    {
+        mediaRecorder.stop();
+        // Remove MediaRecorder from camera pipeline.
+        final boolean[] removeMediaRecorderSuccessful = new boolean[1];
+        final CountDownLatch removeBarrier = new CountDownLatch(1);
+        CameraVideoCapturer.MediaRecorderHandler removeMediaRecorderHandler =
+                new CameraVideoCapturer.MediaRecorderHandler() {
+                    @Override
+                    public void onMediaRecorderSuccess() {
+                        removeMediaRecorderSuccessful[0] = true;
+                        removeBarrier.countDown();
+                    }
+                    @Override
+                    public void onMediaRecorderError(String errorDescription) {
+                        removeMediaRecorderSuccessful[0] = false;
+                        removeBarrier.countDown();
+                    }
+                };
+        CameraVideoCapturer camVideoCapture = (CameraVideoCapturer)videoCapturer;
+        camVideoCapture.removeMediaRecorderFromCamera(removeMediaRecorderHandler);
+        // Wait until MediaRecoder has been removed.
+        try {
+            removeBarrier.await();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
     private VideoTrack createCapturerVideoTrack(VideoCapturer capturer) {
         capturer.startCapture(peerConnectionParameters.videoWidth, peerConnectionParameters.videoHeight, peerConnectionParameters.videoFps);
         localVideoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, videoSource);
         localVideoTrack.setEnabled(renderVideo);
+
+        // Create MediaRecorder object
+        mediaRecorder = new MediaRecorder();
+        StartLocalRecord(mediaRecorder);
         // localVideoTrack.addRenderer(new VideoRenderer(localRender));
         localVideoTrack.addSink(localRender);
         return localVideoTrack;
@@ -345,7 +493,7 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
 
         Logging.d(TAG, "Looking for front facing cameras");
         for(String deviceName : deviceNames){
-            if(enumerator.isFrontFacing(deviceName)){
+            if(enumerator.isBackFacing(deviceName)){
                 Logging.d(TAG, "Creating front facing camera capture");
                 VideoCapturer videoCapturer = enumerator.createCapturer(deviceName, null);
 
@@ -355,7 +503,7 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
         }
         Logging.d(TAG, "Looking for other cameras");
         for(String deviceName : deviceNames){
-            if(!enumerator.isFrontFacing(deviceName)){
+            if(!enumerator.isBackFacing(deviceName)){
                 Logging.d(TAG, "Creating other facing camera capture");
                 VideoCapturer videoCapturer = enumerator.createCapturer(deviceName, null);
 
@@ -410,8 +558,10 @@ final class MediaResourceManager implements NBMWebRTCPeer.Observer {
             // Camera2 support???
             if (useCamera2(appContext)) {
                 camEnumerator = new Camera2Enumerator(appContext);
+                m_bCamerav2 = true;
             } else {
                 camEnumerator = new Camera1Enumerator(false);
+                m_bCamerav2 = false;
             }
             videoCapturer = createCameraCapture(camEnumerator);
             videoSource = factory.createVideoSource(videoCapturer.isScreencast());

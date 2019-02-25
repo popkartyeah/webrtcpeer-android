@@ -20,12 +20,15 @@ package fi.vtt.nubomedia.webrtcpeerandroid;
 import java.util.LinkedList;
 import java.util.List;
 import android.content.Context;
+import android.os.Environment;
 import android.util.Log;
 import org.webrtc.DataChannel;
 import org.webrtc.DefaultVideoDecoderFactory;
 import org.webrtc.DefaultVideoEncoderFactory;
+import org.webrtc.HardwareVideoDecoderFactory;
 import org.webrtc.HardwareVideoEncoderFactory;
 import org.webrtc.IceCandidate;
+import org.webrtc.MP4ReaderFactory;
 import org.webrtc.MediaCodecVideoEncoder;
 import org.webrtc.MediaStream;
 import org.webrtc.PeerConnection;
@@ -689,8 +692,12 @@ public class NBMWebRTCPeer{
         final VideoDecoderFactory decoderFactory;
 
         // hard ware must
-        decoderFactory = new DefaultVideoDecoderFactory(eglBaseContext);
-        encoderFactory = new DefaultVideoEncoderFactory(eglBaseContext,false, true);
+//        decoderFactory = new DefaultVideoDecoderFactory(eglBaseContext);
+        decoderFactory = new HardwareVideoDecoderFactory(eglBaseContext);
+        //encoderFactory = new DefaultVideoEncoderFactory(eglBaseContext,false, true);
+        encoderFactory = new HardwareVideoEncoderFactory(eglBaseContext,false, true);
+//        String filePath = Environment.getExternalStorageDirectory() + "/webrtc_test_video/20190128_173011.mp4";
+//        encoderFactory = new MP4ReaderFactory(filePath);
 
         peerConnectionFactory = PeerConnectionFactory.builder()
                 .setOptions(options)
